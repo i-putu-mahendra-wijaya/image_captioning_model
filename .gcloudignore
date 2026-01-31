@@ -1,0 +1,6 @@
+.git/
+.gitignore/
+venv_*/
+datasets/
+**/*.pyc
+__pycache__/

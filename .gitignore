@@ -1,0 +1,43 @@
+# IDE
+.idea
+.cadence
+
+# Git
+.git
+
+# Dependencies
+**/node_modules/
+**/.pnp
+**/.pnp.js
+
+# Credentials
+**/credentials/**/*.json
+**/cred/**/*.json
+keys/*.yaml
+keys/*.yml
+keys/*.json
+
+# Config
+config.yaml
+
+# Env
+venv/env/*
+**/.env*
+**/venv_*/
+.venv/
+
+# Output
+**/coverage/
+**/build/
+**/logs/
+**/*.log*
+**/*.egg-info
+**/nohup.out
+
+# Misc
+.DS_Store
+**/*.swp
+**/*.backup
+*.pyc
+**/__pycache__/
+**/.python-version

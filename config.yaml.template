@@ -1,0 +1,3 @@
+# run `make config_yaml` to create a new config.yaml file appropriate for your environment
+PROJECT_HOME_PATH: /path/to/your/project/root/folder
+CONFIG_YAML_PATH: /path/to/your/project/root/folder/config.yaml
