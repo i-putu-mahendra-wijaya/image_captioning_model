@@ -34,6 +34,8 @@ venv/env/*
 **/*.egg-info
 **/nohup.out
 
+# Local package
+
 # Misc
 .DS_Store
 **/*.swp
