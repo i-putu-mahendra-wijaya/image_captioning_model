@@ -11,3 +11,7 @@ src_importable:
 config_yaml:
 	# run config_creator to automatically create a new config.yaml
 	python3 config_creator.py
+
+main:
+	# run the main.py
+	python3 main.py
