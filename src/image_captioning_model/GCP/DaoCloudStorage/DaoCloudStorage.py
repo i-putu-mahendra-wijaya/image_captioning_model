@@ -515,6 +515,127 @@ class DaoCloudStorage:
             return None
 
 
+    def stream_blob_with_handler(
+            self,
+            bucket_name: str,
+            object_name: str,
+            callback_func: Callable,
+            *args,
+            **kwargs
+    ) -> Any:
+
+        """
+        Stream a GCS object (blob) and pass its open file-like handle to a callback.
+
+        This method validates that the bucket and object exist, then opens the
+        blob in binary read mode (``"rb"``) using :meth:`google.cloud.storage.blob.Blob.open`.
+        The resulting file-like handler is passed to ``callback_func`` for
+        processing, along with any additional positional and keyword arguments.
+
+        Unlike :meth:`process_blob_with_handler`, this method does **not**
+        download the object to local disk; it streams the content directly from
+        GCS.
+
+        Parameters
+        ----------
+        bucket_name : str
+            Name of the source GCS bucket.
+        object_name : str
+            The full key or path of the object (blob) in GCS to be streamed.
+        callback_func : callable
+            A function that accepts the opened blob handler as its first argument,
+            plus any additional positional or keyword arguments. The handler is a
+            binary file-like object (opened with ``mode="rb"``) supporting methods
+            such as ``read()``, and it is automatically closed when the callback
+            returns or raises.
+        *args : tuple, optional
+            Positional arguments to pass to ``callback_func``.
+        **kwargs : dict, optional
+            Keyword arguments to pass to ``callback_func``.
+
+        Returns
+        -------
+        Any or None
+            The result returned by ``callback_func`` upon success, or ``None`` if
+            the bucket/object does not exist or a cloud/unexpected error occurs.
+
+        Notes
+        -----
+        - This method performs existence checks using :meth:`is_exists` before
+          attempting to open the blob.
+        - The blob handler is managed via a context manager and is guaranteed to
+          be closed after processing.
+        - Errors are handled internally and reported via standard output and
+          traceback printing.
+
+        Examples
+        --------
+        Stream a text file and count lines without downloading it locally:
+
+        >>> def count_lines(fh) -> int:
+        ...     return sum(1 for _ in fh)
+        ...
+        >>> n = dao.stream_blob_with_handler(
+        ...     bucket_name="my-bucket",
+        ...     object_name="logs/app.log",
+        ...     callback_func=count_lines
+        ... )
+        >>> n
+        1234
+
+        Stream a binary file and compute a hash:
+
+        >>> import hashlib
+        >>> def sha256sum(fh) -> str:
+        ...     h = hashlib.sha256()
+        ...     for chunk in iter(lambda: fh.read(1024 * 1024), b""):
+        ...         h.update(chunk)
+        ...     return h.hexdigest()
+        ...
+        >>> digest = dao.stream_blob_with_handler(
+        ...     bucket_name="my-bucket",
+        ...     object_name="images/photo.jpg",
+        ...     callback_func=sha256sum
+        ... )
+        """
+
+        print(f"Attempting to stream file `{object_name}` from bucket `{bucket_name}`...")
+
+        if not self.is_exists(bucket_name=bucket_name):
+            print(f"🚫 ERROR: Bucket `{bucket_name}` does not exist. Cannot download file `{object_name}`.")
+            return None
+
+        elif not self.is_exists(bucket_name=bucket_name, object_name=object_name):
+            print(
+                f"🚫 ERROR: Object `{object_name}` does not exist in bucket `{bucket_name}`. Cannot download.")
+            return None
+
+        try:
+            bucket: Bucket = self.mygcs.get_bucket(bucket_or_name=bucket_name)
+            blob: Blob = bucket.blob(blob_name=object_name)
+
+            with blob.open(mode="rb") as blob_handler:
+                print(f"processing {object_name} blob using callback function `{callback_func.__name__}` ...")
+
+                result: Any = callback_func(blob_handler, *args, **kwargs)
+
+                print(f"processing completed for {object_name}.")
+                return result
+
+        except NotFound:
+            print(f"🚫 ERROR: Object `{object_name}` or bucket `{bucket_name} does not exists. Cannot download.")
+            traceback.print_exc()
+            return None
+
+        except GoogleCloudError:
+            print(f"🚫 ERROR: Failed to download file `{object_name}` from bucket `{bucket_name}`.")
+            traceback.print_exc()
+            return None
+
+        except Exception as exc:
+            print(f"🚫 ERROR: Unexpected error occurred while downloading file `{object_name}` from bucket `{bucket_name}`.")
+            traceback.print_exc()
+            return None
 
     def delete_blob(
             self,
