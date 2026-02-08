@@ -1,13 +1,14 @@
-from typing import Optional, Dict, List
+from typing import Optional, Dict, List, Tuple
 
 from dataclasses import dataclass, asdict
 import os
+import io
 from pathlib import Path
 from pprint import pprint
 
 import numpy as np
 import ijson
-from apache_beam.runners.portability.fn_api_runner.translations import annotate_downstream_side_inputs
+from PIL.ImageFile import ImageFile, Image
 
 # Suppress warnings from TensorFlow
 os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"   # 0=all, 1=INFO off, 2=INFO+WARN off, 3=INFO+WARN+ERROR off (best effort)
@@ -43,6 +44,7 @@ GCP_PROJECT_ID: str = os.getenv("GCP_PROJECT_ID", "GCP_PROJECT_ID not found")
 GCP_PROJECT_LOCATION: str = os.getenv("GCP_PROJECT_LOCATION", "GCP_PROJECT_LOCATION not found")
 
 COCO_BUCKET_NAME: str = os.getenv("COCO_BUCKET_NAME", "COCO_BUCKET_NAME not found")
+COCO_TRAIN_IMAGE_FOLDER: str = os.getenv("COCO_TRAIN_IMAGE_FOLDER", "COCO_TRAIN_IMAGE_FOLDER not found")
 COCO_TRAIN_LABEL_METADATA: str = os.getenv("COCO_TRAIN_LABEL_METADATA", "COCO_TRAIN_LABEL_METADATA not found")
 COCO_TRAIN_CAPTION_METADATA:str = os.getenv("COCO_TRAIN_CAPTION_METADATA", "COCO_TRAIN_CAPTION_METADATA not found")
 
@@ -76,6 +78,12 @@ class CocoBlob:
     image_blob: str
     caption_blob: str
 
+
+coco_blob: CocoBlob = CocoBlob(
+    bucket_name = COCO_BUCKET_NAME,
+    image_blob  = COCO_TRAIN_CAPTION_METADATA,
+    caption_blob = COCO_TRAIN_CAPTION_METADATA,
+)
 
 def extract_image_component(
     blob_reader: BlobReader
@@ -195,12 +203,6 @@ def open_and_extract_coco_json(
 
     mygcs: DaoCloudStorage = DaoCloudStorage(credential_accessor = gcp_cracc)
 
-    coco_blob: CocoBlob = CocoBlob(
-        bucket_name = COCO_BUCKET_NAME,
-        image_blob  = COCO_TRAIN_CAPTION_METADATA,
-        caption_blob = COCO_TRAIN_CAPTION_METADATA,
-    )
-
     image_dict: Dict = mygcs.stream_blob_with_handler(
         bucket_name = coco_blob.bucket_name,
         object_name = coco_blob.image_blob,
@@ -223,6 +225,192 @@ def open_and_extract_coco_json(
     return combined_dict
 
 
+def check_malformed_entries(
+        combined_dict: Dict
+) -> Tuple:
+
+    """Validate combined COCO metadata dictionary for malformed entries.
+
+    This function scans the dictionary produced by `open_and_extract_coco_json`
+    and detects two potential data integrity issues:
+
+    1. Empty-string image IDs ("")
+    2. Image IDs that do not have captions
+
+    The expected structure of `combined_dict` is:
+
+        image_id -> [file_name, caption_1, caption_2, ...]
+
+    Args:
+        combined_dict: Dictionary mapping image IDs to a list containing the
+            file name followed by one or more captions.
+
+    Returns:
+        A tuple containing:
+            - empty_string_keys: list of image IDs equal to ""
+            - images_without_captions: list of image IDs whose value list
+              contains only the file name (length <= 1)
+    """
+
+    empty_string_keys: List[str] = []
+    images_without_captions: List[str] = []
+
+    for each_image_id, values in combined_dict.items():
+
+        if each_image_id == "":
+            empty_string_keys.append(each_image_id)
+
+        if len(values) <= 1:
+            images_without_captions.append(each_image_id)
+
+    return empty_string_keys, images_without_captions
+
+
+def create_base_model(
+
+) -> Model:
+
+    """Create a VGG19 feature-extraction model for transfer learning.
+
+    This function loads the pretrained VGG19 model (ImageNet weights) and
+    constructs a truncated model that outputs the feature map from the
+    `block5_conv4` layer. The resulting model can be used as a fixed
+    convolutional feature extractor for image captioning or other
+    vision tasks.
+
+    Returns:
+        A TensorFlow Keras `Model` whose output corresponds to the
+        `block5_conv4` layer of VGG19.
+    """
+
+    vgg19: Model = VGG19(weights="imagenet")
+
+    print("VGG19 Model Summary ...")
+    vgg19.summary()
+
+    print("Create base model from VGG19 as the base model for Transfer Learning later ... ")
+    base_model: Model = Model(
+        inputs = vgg19.input,
+        outputs = vgg19.get_layer("block5_conv4").output
+    )
+
+    print("Base Model Summary ...")
+    base_model.summary()
+
+    return base_model
+
+
+def resize_and_crop_image(
+    blob_reader: BlobReader,
+) -> np.ndarray:
+
+    """Resize and center-crop an image to VGG-compatible input size.
+
+    This function:
+    1. Loads an image from a file-like stream.
+    2. Resizes the image so that the shortest side becomes 256 pixels.
+    3. Performs a center crop to 224x224 pixels.
+    4. Converts the image to a NumPy array.
+    5. Adds a batch dimension (shape becomes `(1, 224, 224, 3)`).
+
+    This preprocessing matches the typical input preparation used for
+    VGG-style convolutional networks.
+
+    Args:
+        blob_reader: A file-like object (e.g., GCS BlobReader) containing
+            image data.
+
+    Returns:
+        A NumPy array of shape `(1, 224, 224, 3)` representing the
+        resized and cropped image.
+    """
+
+    # Determine dimensions
+    img_bytes: bytes = blob_reader.read()
+    blob_reader.seek(0)
+
+    image: ImageFile = Image.open(io.BytesIO(img_bytes)).convert("RGB")
+
+    width: int = image.size[0]
+    height: int = image.size[1]
+
+    # Resize so the shortest side is 256 pixels
+    if height > width:
+        new_size: Tuple[int, int] = (
+            256,
+            int(height / width * 256)
+        )
+    else:
+        new_size: Tuple[int, int] = (
+            int(width / height * 256),
+            256
+        )
+
+    resized_image = image.resize(new_size)
+
+    resized_width: int = resized_image.size[0]
+    resized_height: int = resized_image.size[1]
+
+    resized_image_np: np.ndarray = np.array(resized_image)
+
+    # Crop to center 224 x 224 region
+    h_start: int = int((resized_height - 224) / 2)
+    w_start: int = int((resized_width - 224) / 2)
+
+    rc_image_np: np.ndarray = resized_image_np[
+        h_start : h_start + 224,
+        w_start : w_start + 224
+    ]
+
+    # Rearrange array to have one more dimension representing batch size = 1
+    rc_image_np = np.expand_dims(
+        rc_image_np,
+        axis = 0
+    )
+
+
+    return rc_image_np
+
+
+def preprocess_coco_image(
+    gcp_cracc: CrAcc,
+    bucket_name: str,
+    image_folder_path: str,
+    image_file_name: str
+) -> np.ndarray:
+
+    """Load and preprocess a COCO image from GCS for VGG19 input.
+
+    COCO images have varying dimensions, while VGG19 expects fixed-size
+    inputs. This function streams an image from Google Cloud Storage and
+    applies resizing and center-cropping via `resize_and_crop_image`.
+
+    Args:
+        gcp_cracc: Credential accessor used for GCS authentication.
+        bucket_name: GCS bucket containing the image.
+        image_folder_path: Folder path inside the bucket.
+        image_file_name: Name of the image file.
+
+    Returns:
+        A NumPy array of shape `(1, 224, 224, 3)` ready for model input.
+    """
+
+    mygcs: DaoCloudStorage = DaoCloudStorage(
+        credential_accessor = gcp_cracc
+    )
+
+    rc_image_np: np.ndarray = mygcs.stream_blob_with_handler(
+        bucket_name = bucket_name,
+        object_name = (
+            image_folder_path +
+            image_file_name
+        ),
+        callback_func = resize_and_crop_image
+    )
+
+    return rc_image_np
+
+
 if __name__ == "__main__":
 
     combined_dict: Dict = open_and_extract_coco_json(
@@ -235,16 +423,27 @@ if __name__ == "__main__":
     )
 
     # Checking if there are any malformed entries
-    empty_string_keys: List[str] = []
-    images_without_captions: List[str] = []
-
-    for each_image_id, values in combined_dict.items():
-
-        if each_image_id == "":
-            empty_string_keys.append(each_image_id)
-
-        if len(values) <= 1:
-            images_without_captions.append(each_image_id)
+    empty_string_keys, images_without_captions = check_malformed_entries(
+        combined_dict = combined_dict
+    )
 
     print(f"Empty string keys: {len(empty_string_keys)}")
     print(f"Images without captions: {len(images_without_captions)}")
+
+    for each_idx, each_image_id in enumerate(combined_dict.keys()):
+
+        if each_idx % 1_000 == 0:
+            print(f"Progress : {each_idx} images processed")
+
+        list_val: List[str] = combined_dict[each_image_id]
+        image_file_name: str = list_val[0]
+        image_folder_path: str = COCO_TRAIN_IMAGE_FOLDER
+
+        rc_image_np: np.ndarray = preprocess_coco_image(
+            gcp_cracc = cracc,
+            bucket_name = coco_blob.bucket_name,
+            image_folder_path = image_folder_path,
+            image_file_name = image_file_name
+        )
+
+        print(f"resized_cropped_image {image_file_name} size {rc_image_np.shape}")
