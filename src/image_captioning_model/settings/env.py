@@ -46,6 +46,7 @@ class EnvVar:
     """
 
     gcs_coco_dataset: str
+    gcs_output_bucket_name: str
     gcs_output_dir: str
     gcp_project_id: str
     gcp_project_location: str
@@ -82,6 +83,7 @@ def get_env(
         - GCP_PROJECT_ID
         - GCP_PROJECT_LOCATION
         - COCO_BUCKET_NAME
+        - GCS_OUTPUT_BUCKET_NAME
         - COCO_TRAIN_IMAGE_FOLDER
         - COCO_TRAIN_LABEL_METADATA
         - COCO_TRAIN_CAPTION_METADATA
@@ -98,6 +100,7 @@ def get_env(
     GCS_OUTPUT_DIR: str = os.getenv("GCS_OUTPUT_DIR", "GCS_OUTPUT_DIR not found")
     GCP_PROJECT_ID: str = os.getenv("GCP_PROJECT_ID", "GCP_PROJECT_ID not found")
     GCP_PROJECT_LOCATION: str = os.getenv("GCP_PROJECT_LOCATION", "GCP_PROJECT_LOCATION not found")
+    GCS_OUTPUT_BUCKET_NAME: str = os.getenv("GCS_OUTPUT_BUCKET_NAME", "GCS_OUTPUT_BUCKET_NAME not found")
 
     COCO_BUCKET_NAME: str = os.getenv("COCO_BUCKET_NAME", "COCO_BUCKET_NAME not found")
     COCO_TRAIN_IMAGE_FOLDER: str = os.getenv("COCO_TRAIN_IMAGE_FOLDER", "COCO_TRAIN_IMAGE_FOLDER not found")
@@ -106,6 +109,7 @@ def get_env(
 
     return EnvVar(
         gcs_coco_dataset = GCS_COCO_DATASET,
+        gcs_output_bucket_name = GCS_OUTPUT_BUCKET_NAME,
         gcs_output_dir = GCS_OUTPUT_DIR,
         gcp_project_id = GCP_PROJECT_ID,
         gcp_project_location = GCP_PROJECT_LOCATION,
