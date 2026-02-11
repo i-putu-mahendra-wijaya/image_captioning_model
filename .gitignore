@@ -33,6 +33,7 @@ venv/env/*
 **/*.log*
 **/*.egg-info
 **/nohup.out
+**/*.pid
 
 # Local package
 

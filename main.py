@@ -19,7 +19,7 @@ from src.image_captioning_model.vision.preprocess import preprocess_coco_image
 from src.image_captioning_model.coco.schemas import CocoBlob
 from src.image_captioning_model.coco.readers import open_and_extract_coco_json
 from src.image_captioning_model.coco.validators import check_malformed_entries
-from src.image_captioning_model.vision.models import create_base_model, save_prediction_npz_to_gcs
+from src.image_captioning_model.vision.models import create_base_model, save_caption_dict_to_gcs, save_prediction_npz_to_gcs
 from src.image_captioning_model.GCP.CredentialAccessor.CredentialAccessor import CredentialAccessor as CrAcc
 from src.image_captioning_model.GCP.DaoCloudStorage.DaoCloudStorage import DaoCloudStorage
 
@@ -68,6 +68,13 @@ def main(
     print(f"Empty string keys: {len(empty_string_keys)}")
     print(f"Images without captions: {len(images_without_captions)}")
 
+    save_caption_dict_to_gcs(
+        mygcs = mygcs,
+        bucket_name = env_var.gcs_output_bucket_name,
+        object_name = "caption/caption.jsonl",
+        caption_dict = combined_dict,
+    )
+
     base_model: Model = create_base_model()
 
     # MAX_IMAGES: int = 5
@@ -99,7 +106,7 @@ def main(
         y: np.ndarray = base_model.predict(X)
 
         pred_result_object_name: str = (
-            f"{env_var.gcs_output_dir.rstrip('/')}/feature_vector/"
+            f"{env_var.gcs_output_dir.rstrip('/')}/"
             f"vgg19_block5_conv4/{image_file_name}.npz"
         )
 

@@ -1,12 +1,16 @@
-from typing import Dict, List
+from typing import Dict, List, Optional
 
 from pathlib import Path
 import tempfile
+import gzip
+import json
 
 from keras import Model
 from keras.src.applications import VGG19
 
 import numpy as np
+
+from google.cloud.storage import Blob
 
 from src.image_captioning_model.GCP.DaoCloudStorage import DaoCloudStorage
 
@@ -50,8 +54,61 @@ def save_caption_dict_to_gcs(
         object_name: str,
         caption_dict: Dict [int, List[str]]
 ) -> None:
-    # TODO: implement save caption dict to gcs
-    pass
+    """
+    Serialize a caption dictionary and upload it to Google Cloud Storage (GCS).
+
+    This function writes the provided ``caption_dict`` into a temporary file
+    as JSON content, compresses it using gzip, and uploads it to the specified
+    GCS bucket using the provided ``DaoCloudStorage`` instance.
+
+    If ``object_name`` does not end with ``.jsonl``, the extension will be
+    automatically appended before upload.
+
+    The upload process is performed using a temporary directory to avoid
+    persisting intermediate files on disk.
+
+    :param mygcs:
+        Cloud Storage DAO responsible for handling upload operations.
+    :type mygcs: DaoCloudStorage
+
+    :param bucket_name:
+        Target GCS bucket name.
+    :type bucket_name: str
+
+    :param object_name:
+        Destination object name in GCS. The ``.jsonl`` extension will be added
+        automatically if not present.
+    :type object_name: str
+
+    :param caption_dict:
+        Mapping from image ID to a list of captions associated with that image.
+    :type caption_dict: Dict[int, List[str]]
+
+    :raises RuntimeError:
+        If the upload to GCS fails.
+
+    :return:
+        None
+    :rtype: None
+    """
+
+    if not object_name.endswith(".jsonl"):
+        object_name = object_name + ".jsonl"
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        local_path: Path =  Path(tmpdir) / Path(object_name).name
+
+        with gzip.open(local_path, "wt", encoding="utf-8") as fhandler:
+            fhandler.write(json.dumps(caption_dict))
+
+        uploaded_blob: Optional[Blob] = mygcs.upload_blob_from_file(
+            bucket_name = bucket_name,
+            object_name = object_name,
+            file_path = local_path
+        )
+
+        if uploaded_blob is None:
+            raise RuntimeError(f"Filed to upload prediction to gs://{bucket_name}/{object_name}")
 
 
 def save_prediction_npz_to_gcs(
