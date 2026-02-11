@@ -1,3 +1,5 @@
+from typing import Dict, List
+
 from pathlib import Path
 import tempfile
 
@@ -40,6 +42,16 @@ def create_base_model(
     base_model.summary()
 
     return base_model
+
+
+def save_caption_dict_to_gcs(
+        mygcs: DaoCloudStorage,
+        bucket_name: str,
+        object_name: str,
+        caption_dict: Dict [int, List[str]]
+) -> None:
+    # TODO: implement save caption dict to gcs
+    pass
 
 
 def save_prediction_npz_to_gcs(

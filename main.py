@@ -70,14 +70,14 @@ def main(
 
     base_model: Model = create_base_model()
 
-    MAX_IMAGES: int = 5
+    # MAX_IMAGES: int = 5
 
     for each_idx, each_image_id in enumerate(combined_dict.keys()):
 
         # TODO: remove this line once you want to push to production
         # we are adding this just so that we can iterate quickly
-        if each_idx >= MAX_IMAGES:
-            break
+        # if each_idx >= MAX_IMAGES:
+        #    break
 
         if each_idx % 1_000 == 0:
             print(f"Progress : {each_idx} images processed")
@@ -99,7 +99,7 @@ def main(
         y: np.ndarray = base_model.predict(X)
 
         pred_result_object_name: str = (
-            f"{env_var.gcs_output_dir.rstrip('/')}/predictions/"
+            f"{env_var.gcs_output_dir.rstrip('/')}/feature_vector/"
             f"vgg19_block5_conv4/{image_file_name}.npz"
         )
 
