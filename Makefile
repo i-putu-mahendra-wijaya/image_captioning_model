@@ -13,5 +13,5 @@ config_yaml:
 	python3 config_creator.py
 
 main:
-	# run the main.py
+	# run the create_feature_vector.py
 	python3 main.py

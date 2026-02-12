@@ -14,7 +14,7 @@ from google.cloud.storage import Blob
 
 from src.image_captioning_model.GCP.DaoCloudStorage import DaoCloudStorage
 
-def create_base_model(
+def create_base_feature_extraction_model(
 
 ) -> Model:
 

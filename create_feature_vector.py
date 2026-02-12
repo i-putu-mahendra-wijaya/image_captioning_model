@@ -19,7 +19,7 @@ from src.image_captioning_model.vision.preprocess import preprocess_coco_image
 from src.image_captioning_model.coco.schemas import CocoBlob
 from src.image_captioning_model.coco.readers import open_and_extract_coco_json
 from src.image_captioning_model.coco.validators import check_malformed_entries
-from src.image_captioning_model.vision.models import create_base_model, save_caption_dict_to_gcs, save_prediction_npz_to_gcs
+from src.image_captioning_model.vision.models import create_base_feature_extraction_model, save_caption_dict_to_gcs, save_prediction_npz_to_gcs
 from src.image_captioning_model.GCP.CredentialAccessor.CredentialAccessor import CredentialAccessor as CrAcc
 from src.image_captioning_model.GCP.DaoCloudStorage.DaoCloudStorage import DaoCloudStorage
 
@@ -30,7 +30,7 @@ tf.get_logger().setLevel(logging.ERROR)
 from keras import Model
 from tensorflow.keras.applications.vgg19 import preprocess_input
 
-def main(
+def create_feature_vector(
 
 ) -> None:
     cracc: CrAcc = CrAcc(
@@ -75,7 +75,7 @@ def main(
         caption_dict = combined_dict,
     )
 
-    base_model: Model = create_base_model()
+    base_model: Model = create_base_feature_extraction_model()
 
     # MAX_IMAGES: int = 5
 
@@ -119,4 +119,4 @@ def main(
         )
 
 if __name__ == "__main__":
-    main()
+    create_feature_vector()
