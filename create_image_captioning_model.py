@@ -22,6 +22,15 @@ project_config: ProjectConfig = load_project_config(
 )
 
 import tensorflow as tf
+
+gpus = tf.config.list_physical_devices('GPU')
+if gpus:
+    try:
+        for gpu in gpus:
+            tf.config.experimental.set_memory_growth(gpu, True)
+    except RuntimeError as e:
+        print(e)
+
 from tensorflow import keras
 from tensorflow.keras.layers import (
     Input,
@@ -57,10 +66,10 @@ tf.get_logger().setLevel(logging.ERROR)
 from google.cloud.storage import Blob
 
 # Defining Global Constants
-EPOCHS: int = 30
-BATCH_SIZE: int = 10
+EPOCHS: int = 100
+BATCH_SIZE: int = 128
 MAX_WORDS: int = 10_000
-READ_IMAGES: int = 1_000
+READ_IMAGES: int = 50_000
 LAYER_SIZE: int = 256
 EMBEDDING_WIDTH: int = 128
 
@@ -379,7 +388,7 @@ def token_to_sentence(
 
         if each_word == STOP_WORD:
             break
-        elif each_word not in skip_words:
+        elif each_word in skip_words:
             continue
         elif each_word == prev_word:
             continue
@@ -711,7 +720,11 @@ def build_decoder_model(
     dec_layer1: tf.Module = LSTM(
         LAYER_SIZE,
         return_state = True,
-        return_sequences = True
+        return_sequences = True,
+        recurrent_dropout = 0.0001,
+        activation = "tanh",
+        recurrent_activation = "sigmoid",
+        implementation = 1
     )
 
     dec_concat_layer: tf.Module = Concatenate()
@@ -929,14 +942,16 @@ def main(
     artifacts_dir: Path = cwd / "artifacts" / "image_captioning"
     print(f"Artifacts will be saved to: {artifacts_dir}")
 
-    break_limit: int = 2
+    cumulative_history: List[Dict] = []
+
+    # break_limit: int = 2
 
     for each_epoch in range(EPOCHS):
 
         # TODO: comment / uncomment this if you want to break early
         # useful when you are still developing
-        if each_epoch >= break_limit:
-           break
+        # if each_epoch >= break_limit:
+        #   break
 
         print("#"*60)
         print(f"Epoch {each_epoch}/{EPOCHS}")
@@ -948,6 +963,8 @@ def main(
             verbose = 2
         )
 
+        cumulative_history.append(history.history)
+
         if each_epoch % 1 == 0:
             pprint(
                 history.history,
@@ -956,8 +973,8 @@ def main(
 
             history_path: Path = artifacts_dir / "history.jsonl"
 
-            with open(history_path, "a") as f_handler:
-                f_handler.write(json.dumps(history.history, ensure_ascii = True))
+            with open(history_path, "w") as f_handler:
+                f_handler.write(json.dumps(cumulative_history, ensure_ascii = True))
                 f_handler.write("\n")
 
             # save trained model every 3 epochs
