@@ -3,7 +3,7 @@ requirements:
 	cp conda_env.yaml conda_env.yaml.backup;
 
 	# create new requirements.txt
-	conda env export > conda_env.yaml
+	conda env export --from-history > conda_env.yaml
 
 src_importable:
 	python3 -m pip install -e .

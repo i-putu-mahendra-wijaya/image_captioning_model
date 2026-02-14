@@ -1,4 +1,4 @@
-from typing import Optional,  Union, Any, Callable
+from typing import Optional, Union, Any, Callable, List, Iterable
 import tempfile
 import traceback
 
@@ -429,6 +429,86 @@ class DaoCloudStorage:
 
         except Exception as exc:
             print(f"🚫ERROR: Unexpected error occurred while downloading file `{object_name}` from bucket `{bucket_name}`.")
+            traceback.print_exc()
+            return None
+
+
+    def download_prefix_to_temp(
+            self,
+            bucket_name: str,
+            prefix: str,
+            allowed_extensions: Optional[Iterable[str]] = None
+    ) -> Optional[Path]:
+        """
+        Download all blobs under a GCS prefix into a temporary local directory.
+
+        Parameters
+        ----------
+        bucket_name : str
+            Name of the source GCS bucket.
+        prefix : str
+            Prefix (folder path) within the bucket to download from.
+        allowed_extensions : iterable of str, optional
+            If provided, only blobs whose names end with one of these suffixes
+            (case-insensitive) will be downloaded (e.g., [".jpg", ".png"]).
+
+        Returns
+        -------
+        :class:`pathlib.Path` or None
+            Path to the temporary directory containing downloaded blobs, or
+            ``None`` if the bucket/prefix does not exist or a download fails.
+        """
+
+        print(f"Attempting to download blobs under `{prefix}` from bucket `{bucket_name}`...")
+
+        if not self.is_exists(bucket_name=bucket_name):
+            print(f"🚫 ERROR: Bucket `{bucket_name}` does not exist. Cannot download prefix `{prefix}`.")
+            return None
+
+        try:
+            bucket: Bucket = self.mygcs.get_bucket(bucket_or_name=bucket_name)
+            prefix_norm: str = prefix.rstrip("/") + "/"
+
+            if allowed_extensions is not None:
+                allowed_exts: List[str] = [ext.lower() for ext in allowed_extensions]
+            else:
+                allowed_exts = []
+
+            temp_dir: Path = Path(tempfile.mkdtemp())
+            downloaded: int = 0
+
+            for blob in bucket.list_blobs(prefix=prefix_norm):
+                if blob.name.endswith("/"):
+                    continue
+                if allowed_exts and not blob.name.lower().endswith(tuple(allowed_exts)):
+                    continue
+
+                relative_path: Path = Path(blob.name).relative_to(prefix_norm)
+                local_path: Path = temp_dir / relative_path
+                local_path.parent.mkdir(parents=True, exist_ok=True)
+
+                blob.download_to_filename(filename=str(local_path))
+                downloaded += 1
+
+            if downloaded == 0:
+                print(f"🚫 ERROR: No blobs found under `{prefix}` in bucket `{bucket_name}`.")
+                return None
+
+            print(f"Downloaded {downloaded} blob(s) to temporary folder `{temp_dir}`.")
+            return temp_dir
+
+        except NotFound:
+            print(f"🚫 ERROR: Bucket `{bucket_name}` does not exist. Cannot download prefix `{prefix}`.")
+            traceback.print_exc()
+            return None
+
+        except GoogleCloudError:
+            print(f"🚫 ERROR: Failed to download blobs under `{prefix}` from bucket `{bucket_name}`.")
+            traceback.print_exc()
+            return None
+
+        except Exception:
+            print(f"🚫 ERROR: Unexpected error occurred while downloading prefix `{prefix}` from bucket `{bucket_name}`.")
             traceback.print_exc()
             return None
 
