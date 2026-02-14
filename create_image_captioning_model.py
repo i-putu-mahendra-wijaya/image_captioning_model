@@ -57,12 +57,10 @@ tf.get_logger().setLevel(logging.ERROR)
 from google.cloud.storage import Blob
 
 # Defining Global Constants
-EPOCHS: int = 20
-# BATCH_SIZE: int = 128
+EPOCHS: int = 30
 BATCH_SIZE: int = 10
 MAX_WORDS: int = 10_000
-# READ_IMAGES: int = 90_000
-READ_IMAGES: int = 100
+READ_IMAGES: int = 1_000
 LAYER_SIZE: int = 256
 EMBEDDING_WIDTH: int = 128
 
@@ -472,13 +470,23 @@ class ImageCaptionSequence(Sequence):
         if not object_name.endswith(".npz"):
             object_name = object_name + ".npz"
 
+        expected_shape: Tuple[int, int, int] = (14, 14, 512)
+
         def _read(
             local_path: Path
         ) -> np.ndarray:
             with np.load(local_path) as npz_handler:
                 arr = npz_handler["block5_conv4"]
 
-            return arr.squeeze(0)
+            if arr.ndim == 4 and arr.shape[0] == 1:
+                arr = arr[0]
+
+            if arr.shape != expected_shape:
+                raise ValueError(
+                    f"Bad feature shape {arr.shape} for `{object_name}`; expected {expected_shape}"
+                )
+
+            return arr
 
         return self.mygcs.process_blob_with_handler(
             bucket_name = self.bucket_name,
@@ -516,11 +524,45 @@ class ImageCaptionSequence(Sequence):
             idx * self.batch_size : (idx + 1) * self.batch_size
         ]
 
-        features: np.ndarray = np.stack(
-            [self._load_npz(each_img) for each_img in batch_x0], axis=0
-        )
+        # features: np.ndarray = np.stack(
+        #     [self._load_npz(each_img) for each_img in batch_x0], axis=0
+        # )
 
-        return [features, batch_x1], batch_y
+        valid_features: List[np.ndarray] = []
+        valid_x1: List[List[int]] = []
+        valid_y: List[List[int]] = []
+
+        expected_shape: Tuple[int, int, int] = (14, 14, 512)
+
+        for img, each_x1, each_y in zip(batch_x0, batch_x1, batch_y):
+            try:
+                feat = self._load_npz(img)
+            except Exception as e:
+                print(f"Skipping GCS object `{img}`: {e}")
+                continue
+
+            if feat is None:
+                print(f"Skipping GCS object `{img}`: feat is None!")
+                continue
+
+            if feat.shape != expected_shape:
+                print(f"Skipping GCS object `{img}`: {feat.shape} != {expected_shape}")
+                continue
+
+            valid_features.append(feat)
+            valid_x1.append(each_x1)
+            valid_y.append(each_y)
+
+        if len(valid_features) == 0:
+            raise ValueError(
+                "No valid samples in batch after filtering bad feature vectors"
+            )
+
+        features_batch: np.ndarray = np.stack(valid_features, axis = 0)
+        input_batch: np.ndarray = np.asarray(valid_x1, dtype = np.int32)
+        target_batch: np.ndarray = np.asarray(valid_y, dtype = np.int32)
+
+        return [features_batch, input_batch], target_batch
 
 def build_encoder_model(
 
@@ -891,8 +933,10 @@ def main(
 
     for each_epoch in range(EPOCHS):
 
+        # TODO: comment / uncomment this if you want to break early
+        # useful when you are still developing
         if each_epoch >= break_limit:
-            break
+           break
 
         print("#"*60)
         print(f"Epoch {each_epoch}/{EPOCHS}")
@@ -909,7 +953,14 @@ def main(
                 history.history,
                 indent = 4,
             )
-            # save trained model every 10 epochs
+
+            history_path: Path = artifacts_dir / "history.jsonl"
+
+            with open(history_path, "a") as f_handler:
+                f_handler.write(json.dumps(history.history, ensure_ascii = True))
+                f_handler.write("\n")
+
+            # save trained model every 3 epochs
             save_captioning_artifacts(
                 base_dir=artifacts_dir,
                 inference_encoder_model=inference_enc_model,
@@ -970,6 +1021,11 @@ def main(
                 if prev_word_index == STOP_INDEX:
                     break
 
+            list_raw_pred_words: List[str] = token_to_words(
+                tokenizer = dest_tokenizer,
+                token_sequence = pred_seq
+            )
+
             the_caption: str = token_to_sentence(
                 tokenizer = dest_tokenizer,
                 token_sequence = pred_seq,
@@ -977,6 +1033,7 @@ def main(
 
             image_caption_dict: Dict[str, str] = {
                 "test_image_name": image_file_name,
+                "list_raw_pred_words": list_raw_pred_words,
                 "generated_caption": the_caption
             }
 
