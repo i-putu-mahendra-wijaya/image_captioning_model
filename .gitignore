@@ -27,6 +27,9 @@ venv/env/*
 .venv/
 
 # Output
+artifacts/image_captioning/models/*
+artifacts/**/*.json
+artifacts/**/*.jsonl
 **/coverage/
 **/build/
 **/logs/

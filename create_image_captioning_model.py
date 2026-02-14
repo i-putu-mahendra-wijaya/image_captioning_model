@@ -37,7 +37,8 @@ from tensorflow.keras.models import Model
 from tensorflow.keras.optimizers import Adam
 from tensorflow.keras.preprocessing.text import (
     Tokenizer,
-    text_to_word_sequence
+    text_to_word_sequence,
+    tokenizer_from_json
 )
 from tensorflow.python.keras.callbacks import History
 from tensorflow.keras.applications import VGG19
@@ -75,6 +76,130 @@ OOV_INDEX: int = 1
 START_INDEX: int = MAX_WORDS - 2
 STOP_INDEX: int = MAX_WORDS - 1
 MAX_LENGTH: int = 60
+
+
+def save_captioning_artifacts(
+    base_dir: Path,
+    inference_encoder_model: Model,
+    decoder_model: Model,
+    tokenizer: Tokenizer,
+    mygcs: DaoCloudStorage,
+    env_var: EnvVar
+) -> None:
+    """
+    Saves captioning-related artifacts including models, tokenizer data, and metadata. The function also uploads the saved
+    artifacts to a specified Google Cloud Storage (GCS) bucket.
+
+    Args:
+        base_dir (Path): The base directory where artifacts will be stored locally.
+        inference_encoder_model (Model): The encoder model used for inference, to be saved in the artifacts.
+        decoder_model (Model): The decoder model to be saved in the artifacts.
+        tokenizer (Tokenizer): The tokenizer instance whose configuration and metadata will be saved.
+        mygcs (DaoCloudStorage): The GCS utility for uploading artifacts to a GCS bucket.
+        env_var (EnvVar): Contains environment variables, including the GCS bucket name for storing artifacts.
+
+    """
+    base_dir.mkdir(parents = True, exist_ok = True)
+    models_dir: Path = base_dir / "models"
+    models_dir.mkdir(parents = True, exist_ok = True)
+
+    encoder_dir: Path = models_dir / "encoder_saved_model"
+    decoder_dir: Path = models_dir / "decoder_saved_model"
+
+    inference_encoder_model.save(
+        str(encoder_dir),
+        overwrite = True,
+        include_optimizer = False
+    )
+    decoder_model.save(
+        str(decoder_dir),
+        overwrite = True,
+        include_optimizer = False
+    )
+
+    tokenizer_json_path: Path = base_dir / "tokenizer.json"
+    tokenizer_word_index_path: Path = base_dir / "tokenizer_word_index.json"
+    metadata_path: Path = base_dir / "tokenizer_metadata.json"
+
+    tokenizer_json_path.write_text(
+        tokenizer.to_json(),
+        encoding = "utf-8"
+    )
+
+    tokenizer_word_index_path.write_text(
+        json.dumps(tokenizer.word_index, indent = 2, sort_keys = True),
+        encoding = "utf-8"
+    )
+
+    metadata: Dict[str, Any] = {
+        "pad_word": PAD_WORD,
+        "oov_word": OOV_WORD,
+        "start_word": START_WORD,
+        "stop_word": STOP_WORD,
+        "pad_index": PAD_INDEX,
+        "oov_index": OOV_INDEX,
+        "start_index": START_INDEX,
+        "stop_index": STOP_INDEX,
+        "max_words": MAX_WORDS,
+        "max_length": MAX_LENGTH,
+        "embedding_width": EMBEDDING_WIDTH,
+        "layer_size": LAYER_SIZE
+    }
+
+    metadata_path.write_text(
+        json.dumps(metadata, indent = 2, sort_keys = True),
+        encoding = "utf-8"
+    )
+
+    mygcs.upload_local_folder(
+        gcs_bucket_name = env_var.gcs_output_bucket_name,
+        local_folder_path = base_dir,
+        gcs_folder_prefix="artifacts/image_captioning"
+    )
+
+
+def load_captioning_artifacts(
+    base_dir: Path
+) -> Tuple[Model, Model, Tokenizer, Dict[str, Any]]:
+    """
+    Loads captioning artifacts including encoder model, decoder model, tokenizer, and metadata.
+
+    This function initializes and returns the pretrained models, tokenizer, and associated metadata
+    necessary for performing captioning tasks. Models are loaded from the specified base directory,
+    and tokenizer information is retrieved from JSON files.
+
+    Args:
+        base_dir (Path): The base directory containing the models and tokenizer files. The directory
+            should include the "models" folder with "encoder_saved_model" and "decoder_saved_model"
+            subdirectories, and the files "tokenizer.json" and "tokenizer_metadata.json".
+
+    Returns:
+        Tuple[Model, Model, Tokenizer, Dict[str, Any]]: A tuple containing the following elements:
+            - inference_encoder_model (Model): The pretrained encoder model.
+            - decoder_model (Model): The pretrained decoder model.
+            - tokenizer (Tokenizer): The tokenizer loaded from the JSON file.
+            - metadata (Dict[str, Any]): The metadata associated with the tokenizer, loaded from
+              the metadata JSON file.
+    """
+
+    models_dir: Path = base_dir / "models"
+    encoder_dir: Path = models_dir / "encoder_saved_model"
+    decoder_dir: Path = models_dir / "decoder_saved_model"
+
+    inference_encoder_model: Model = keras.models.load_model(str(encoder_dir))
+    decoder_model: Model = keras.models.load_model(str(decoder_dir))
+
+    tokenizer_json_path: Path = base_dir / "tokenizer.json"
+    metadata_path: Path = base_dir / "tokenizer_metadata.json"
+
+    tokenizer_json: str = tokenizer_json_path.read_text(encoding = "utf-8")
+    tokenizer: Tokenizer = tokenizer_from_json(tokenizer_json)
+
+    metadata: Dict[str, Any] = json.loads(
+        metadata_path.read_text(encoding = "utf-8")
+    )
+
+    return inference_encoder_model, decoder_model, tokenizer, metadata
 
 
 def read_training_file(
@@ -759,7 +884,10 @@ def main(
         encoder_model=enc_model_top
     )
 
-    break_limit: int = 5
+    artifacts_dir: Path = cwd / "artifacts" / "image_captioning"
+    print(f"Artifacts will be saved to: {artifacts_dir}")
+
+    break_limit: int = 2
 
     for each_epoch in range(EPOCHS):
 
@@ -776,7 +904,23 @@ def main(
             verbose = 2
         )
 
+        if each_epoch % 1 == 0:
+            pprint(
+                history.history,
+                indent = 4,
+            )
+            # save trained model every 10 epochs
+            save_captioning_artifacts(
+                base_dir=artifacts_dir,
+                inference_encoder_model=inference_enc_model,
+                decoder_model=decoder_model,
+                tokenizer=dest_tokenizer,
+                mygcs = mygcs,
+                env_var = env_var
+            )
+
         # Try to make caption from test images
+        test_image_captions: List[Dict] = []
         for each_img_path in test_image_paths:
 
             image_file_name: str = each_img_path.name
@@ -836,10 +980,15 @@ def main(
                 "generated_caption": the_caption
             }
 
-            pprint(
-                image_caption_dict,
-                indent = 4
-            )
+            test_image_captions.append(image_caption_dict)
+
+        image_caption_json_path: Path = artifacts_dir / "test_image_captions.jsonl"
+
+        with image_caption_json_path.open("w", encoding="utf-8") as f_handler:
+
+            for each_caption_dict in test_image_captions:
+                f_handler.write(json.dumps(each_caption_dict, ensure_ascii=True))
+                f_handler.write("\n")
 
 
 
