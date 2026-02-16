@@ -22,7 +22,7 @@ config.yaml
 
 # Env
 venv/env/*
-**/.env*
+**/.env
 **/venv_*/
 .venv/
 
