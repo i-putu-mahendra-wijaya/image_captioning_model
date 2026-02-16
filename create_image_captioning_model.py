@@ -71,9 +71,9 @@ from google.cloud.storage import Blob
 
 # Defining Global Constants
 EPOCHS: int = 100
-BATCH_SIZE: int = 128
+BATCH_SIZE: int = 256
 MAX_WORDS: int = 10_000
-READ_IMAGES: int = 50_000
+READ_IMAGES: int = 51_200
 LAYER_SIZE: int = 256
 EMBEDDING_WIDTH: int = 128
 
@@ -979,14 +979,14 @@ def main(
 
     cumulative_history: List[Dict] = []
 
-    break_limit: int = 2
+    # break_limit: int = 2
 
     for each_epoch in range(EPOCHS):
 
         # TODO: comment / uncomment this if you want to break early
         # useful when you are still developing
-        if each_epoch >= break_limit:
-          break
+        # if each_epoch >= break_limit:
+        #  break
 
         epoch_header: str = (
             "\n\n"
@@ -1016,7 +1016,7 @@ def main(
 
         cumulative_history.append(history.history)
 
-        if each_epoch % 1 == 0:
+        if each_epoch % 10 == 0:
             pprint(
                 history.history,
                 indent = 4,
@@ -1029,7 +1029,7 @@ def main(
                     json.dumps(cumulative_history, ensure_ascii = True)
                 )
 
-            # save trained model every 3 epochs
+            # save trained model every 10 epochs
             save_captioning_artifacts(
                 base_dir=artifacts_dir,
                 inference_encoder_model=inference_enc_model,
@@ -1108,13 +1108,14 @@ def main(
 
             test_image_captions.append(image_caption_dict)
 
-        image_caption_json_path: Path = artifacts_dir / "test_image_captions.jsonl"
+        image_caption_json_path: Path = artifacts_dir / "test_image_captions.json"
 
         with image_caption_json_path.open("w", encoding="utf-8") as f_handler:
 
             for each_caption_dict in test_image_captions:
-                f_handler.write(json.dumps(each_caption_dict, ensure_ascii=True))
-                f_handler.write("\n")
+                f_handler.write(
+                    json.dumps(each_caption_dict, ensure_ascii=True)
+                )
 
 
 
