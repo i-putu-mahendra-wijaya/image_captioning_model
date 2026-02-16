@@ -1,6 +1,7 @@
 from typing import List, Dict, Optional, Tuple, Union, Any, Set
 
 from pathlib import Path
+from datetime import datetime
 import json
 import tempfile
 import gzip
@@ -49,7 +50,10 @@ from tensorflow.keras.preprocessing.text import (
     text_to_word_sequence,
     tokenizer_from_json
 )
-from tensorflow.python.keras.callbacks import History
+from tensorflow.python.keras.callbacks import (
+    History,
+    Callback
+)
 from tensorflow.keras.applications import VGG19
 from tensorflow.keras.applications.vgg19 import preprocess_input
 from tensorflow.keras.preprocessing.image import (
@@ -83,6 +87,37 @@ OOV_INDEX: int = 1
 START_INDEX: int = MAX_WORDS - 2
 STOP_INDEX: int = MAX_WORDS - 1
 MAX_LENGTH: int = 60
+
+
+class BatchProgressLOgger(Callback):
+
+    def __init__(
+            self,
+            total_batches: int
+    ) -> None:
+        super().__init__()
+        self.total_batches: int = total_batches
+        self.batch_count: int = 0
+
+    def on_train_batch_end(
+            self,
+            batch: int,
+            logs: Optional[Dict[str, float]] = None
+    ) -> None:
+        # batch is 0-based
+        print("\n\n\n")
+        print("--"*50)
+        print(f"# {datetime.now()} Epoch {self.epoch + 1}/{EPOCHS} | Batch {batch + 1}/{self.total_batches}")
+        print("--"*50)
+        print("\n\n\n\n\n")
+
+    def on_epoch_begin(
+            self,
+            epoch: int,
+            logs: Optional[Dict[str, float]] = None
+    ) -> None:
+        self.epoch = epoch
+
 
 
 def save_captioning_artifacts(
@@ -944,23 +979,39 @@ def main(
 
     cumulative_history: List[Dict] = []
 
-    # break_limit: int = 2
+    break_limit: int = 2
 
     for each_epoch in range(EPOCHS):
 
         # TODO: comment / uncomment this if you want to break early
         # useful when you are still developing
-        # if each_epoch >= break_limit:
-        #   break
+        if each_epoch >= break_limit:
+          break
 
-        print("#"*60)
-        print(f"Epoch {each_epoch}/{EPOCHS}")
-        print("#"*60)
+        epoch_header: str = (
+            "\n\n"
+            + "#" * 100
+            + "\n"
+            + f"# {datetime.now()} | "
+            + f"Epoch {each_epoch + 1}/{EPOCHS}"
+            + "\n"
+            + "#" * 100
+            + "\n\n\n\n"
+        )
+
+        print(epoch_header)
+
+        with open(Path("log")/f"epoch_log_{datetime.now().date()}.log", mode="a") as epoch_log_handler:
+            epoch_log_handler.write(epoch_header)
+
+        total_batches: int = len(image_caption_sequence)
+        progress_cb: BatchProgressLOgger = BatchProgressLOgger(total_batches = total_batches)
 
         history: History = training_model.fit(
             image_caption_sequence,
             epochs = 1,
-            verbose = 2
+            verbose = 2,
+            callbacks = [progress_cb]
         )
 
         cumulative_history.append(history.history)
@@ -971,11 +1022,12 @@ def main(
                 indent = 4,
             )
 
-            history_path: Path = artifacts_dir / "history.jsonl"
+            history_path: Path = artifacts_dir / "history.json"
 
             with open(history_path, "w") as f_handler:
-                f_handler.write(json.dumps(cumulative_history, ensure_ascii = True))
-                f_handler.write("\n")
+                f_handler.write(
+                    json.dumps(cumulative_history, ensure_ascii = True)
+                )
 
             # save trained model every 3 epochs
             save_captioning_artifacts(
